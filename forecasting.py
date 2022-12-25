@@ -48,9 +48,9 @@ if __name__ == '__main__':
             CITIES.keys()
         )
 
-    results = list(results)
+    forecast_responses = list(results)
 
-    calculate_average_values(forecasts=results, queue=q)
+    calculate_average_values(forecasts=forecast_responses, queue=q)
     save_aggregated_results(q)
 
     logger.info('\nBest cities to visit: %s' % ','.join(DataAnalyzingTask.visit_advice()))

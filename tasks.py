@@ -1,5 +1,6 @@
 import json
 from multiprocessing import Queue
+from typing import Optional
 
 from api_client import YandexWeatherAPI
 from forecast_dataclasses.forecast_average import (AggregatedIndicators,
@@ -40,7 +41,7 @@ class DataCalculationTask:
     def __init__(self, city_forecasts: ForecastResponse) -> None:
         self._forecasts = city_forecasts
 
-    def calculate_average_indicators(self, queue: Queue = None) -> dict:
+    def calculate_average_indicators(self, queue: Optional[Queue] = None) -> dict:
         avg_result = self.serialize_city_statistic(
             data=CityStatistic(
                 city=self._forecasts.city,
@@ -122,7 +123,7 @@ class DataAnalyzingTask:
     __slots__ = ()
 
     @staticmethod
-    def visit_advice() -> list[str]:
+    def visit_advice() -> list:
         with open(RESULT_FILE_NAME, 'r') as file:
             data: list[dict] = json.load(file)
 
@@ -131,7 +132,7 @@ class DataAnalyzingTask:
 
         # Not correct to use sort + lambda we need all cities that contain same stat
         for city_stat in data:
-            rating = city_stat.get('avg_temp') + city_stat.get('avg_rainless_hours')
+            rating = city_stat['avg_temp'] + city_stat['avg_rainless_hours']
             if rating > max_rating:
                 cities_to_visit = [city_stat.get('city')]
                 max_rating = rating

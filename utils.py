@@ -38,7 +38,7 @@ def check_python_version():
         )
 
 
-def calc_avg(iterable_data: list[int]) -> float:
+def calc_avg(iterable_data: list[float]) -> float:
     try:
         return round(sum(iterable_data) / len(iterable_data), 2)
     except ZeroDivisionError:
