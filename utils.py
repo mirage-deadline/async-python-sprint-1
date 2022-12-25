@@ -21,6 +21,8 @@ CLEAR_WEATHER_SIGNS = ('clear', 'partly-cloudy', 'cloudy', 'overcast')
 MIN_MAJOR_PYTHON_VER = 3
 MIN_MINOR_PYTHON_VER = 9
 
+RESULT_FILE_NAME = 'report.json'
+
 
 def check_python_version():
     import sys
@@ -38,6 +40,6 @@ def check_python_version():
 
 def calc_avg(iterable_data: list[int]) -> float:
     try:
-        return sum(iterable_data) / len(iterable_data)
+        return round(sum(iterable_data) / len(iterable_data), 2)
     except ZeroDivisionError:
         return 0
