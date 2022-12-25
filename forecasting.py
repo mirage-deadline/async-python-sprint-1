@@ -53,4 +53,4 @@ if __name__ == '__main__':
     calculate_average_values(forecasts=forecast_responses, queue=q)
     save_aggregated_results(q)
 
-    logger.info('\nBest cities to visit: %s' % ','.join(DataAnalyzingTask.visit_advice()))
+    logger.info('Best cities to visit: %s' % ','.join(DataAnalyzingTask.visit_advice()))
