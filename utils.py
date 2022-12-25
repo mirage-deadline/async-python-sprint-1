@@ -16,6 +16,7 @@ CITIES = {
     "CAIRO": "https://code.s3.yandex.net/async-module/cairo-response.json",
 }
 ERR_MESSAGE_TEMPLATE = "Something wrong. Please contact with mentor."
+CLEAR_WEATHER_SIGNS = ('clear', 'partly-cloudy', 'cloudy', 'overcast')
 
 MIN_MAJOR_PYTHON_VER = 3
 MIN_MINOR_PYTHON_VER = 9
@@ -33,3 +34,10 @@ def check_python_version():
                 MIN_MAJOR_PYTHON_VER, MIN_MINOR_PYTHON_VER
             )
         )
+
+
+def calc_avg(iterable_data: list[int]) -> float:
+    try:
+        return sum(iterable_data) / len(iterable_data)
+    except ZeroDivisionError:
+        return 0
