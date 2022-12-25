@@ -1,28 +1,29 @@
-import pandas as pd
+import json
+from multiprocessing import Queue
+from typing import Optional
 
 from api_client import YandexWeatherAPI
 from forecast_dataclasses.forecast_average import (AggregatedIndicators,
-                                                   AvgTempDaily, CityStatistic,
-                                                   RainlessHoursDaily)
+                                                   CityStatistic,
+                                                   WeatherHoursDailyStat)
 from forecast_dataclasses.forecast_response import (DailyForecast,
                                                     ForecastResponse,
                                                     HourlyForecast)
 from services.logger import logger
-from utils import CLEAR_WEATHER_SIGNS, calc_avg
+from utils import CLEAR_WEATHER_SIGNS, RESULT_FILE_NAME, calc_avg
 
 
 class DataFetchingTask:
 
-    __slots__ = ('city', 'api_clent')
+    __slots__ = ('api_clent', )
 
-    def __init__(self, city: str, api_client: YandexWeatherAPI) -> None:
-        self.city = city
+    def __init__(self, api_client: YandexWeatherAPI) -> None:
         self.api_clent = api_client
 
-    def fetch_forecast(self) -> ForecastResponse:
-        response = self.api_clent.get_forecasting(self.city)
+    def fetch_forecast(self, city: str) -> ForecastResponse:
+        response = self.api_clent.get_forecasting(city)
         return ForecastResponse(
-            city=self.city,
+            city=city,
             forecasts=[
                 DailyForecast(**forecast) for forecast in
                 response.get('forecasts', []) if forecast.get('hours')
@@ -40,34 +41,36 @@ class DataCalculationTask:
     def __init__(self, city_forecasts: ForecastResponse) -> None:
         self._forecasts = city_forecasts
 
-    def calculate_average_indicators(self) -> list[dict]:
-        return self.serialize_city_statistic(
+    def calculate_average_indicators(self, queue: Optional[Queue] = None) -> dict:
+        avg_result = self.serialize_city_statistic(
             data=CityStatistic(
                 city=self._forecasts.city,
                 aggregated_indicators=self._avg_daily_calc()
             )
         )
 
+        if queue:
+            queue.put(avg_result)
+
+        return avg_result
+
     def _avg_daily_calc(self) -> AggregatedIndicators:
 
-        daily_data = AggregatedIndicators()
-        total_rainliess_avg, total_temp_avg = [], []
+        all_data = AggregatedIndicators()
         for daily_forecast in self._forecasts.forecasts:
-            for attr, res in zip(
-                ('temp_data', 'rainless_data'),
-                self._calc_daily_indicators(daily_forecast)
-            ):
-                if attr == 'temp_data':
-                    total_temp_avg.append(res.daily_avg_temp)
-                else:
-                    total_rainliess_avg.append(res.rainless_hours_count)
-                getattr(daily_data, attr).append(res)
+            daily_stat = self._calc_daily_indicators(daily_forecast)
+            all_data.weather_stat.append(daily_stat)
 
-        daily_data.avg_rainless_hours = calc_avg(total_rainliess_avg)
-        daily_data.avg_temp = calc_avg(total_temp_avg)
-        return daily_data
+        all_data.avg_temp = calc_avg(
+            [stat.daily_avg_temp for stat in all_data.weather_stat]
+        )
+        all_data.avg_rainless_hours = calc_avg(
+            [stat.rainless_hours_count for stat in all_data.weather_stat]
+        )
 
-    def _calc_daily_indicators(self, daily_forecast: DailyForecast):
+        return all_data
+
+    def _calc_daily_indicators(self, daily_forecast: DailyForecast) -> WeatherHoursDailyStat:
 
         hour_forecast: HourlyForecast
         # Filter hours that included in statistics only
@@ -82,33 +85,26 @@ class DataCalculationTask:
             if hour_forecast.condition in CLEAR_WEATHER_SIGNS:
                 rainless_hours_count += 1
             temperatures.append(hour_forecast.temp)
-        return \
-            AvgTempDaily(
-                date=daily_forecast.date,
-                daily_avg_temp=calc_avg(temperatures)
-            ),\
-            RainlessHoursDaily(
-                date=daily_forecast.date,
-                rainless_hours_count=rainless_hours_count
-            )
+        return WeatherHoursDailyStat(
+            date=daily_forecast.date,
+            daily_avg_temp=calc_avg(temperatures),
+            rainless_hours_count=rainless_hours_count
+        )
 
     @staticmethod
     def serialize_city_statistic(data: CityStatistic):
-        return [
-            {
-                'Город/день': data.city,
-                'Погода': 'Температура, среднее',
-                **{avg_temp_daily_obj.date: avg_temp_daily_obj.daily_avg_temp
-                    for avg_temp_daily_obj in data.aggregated_indicators.temp_data},
-                'Среднее': data.aggregated_indicators.avg_temp
-            },
-            {
-                'Погода': 'Без осадков, часов',
-                **{avg_rainless_daily_obj.date: avg_rainless_daily_obj.rainless_hours_count
-                    for avg_rainless_daily_obj in data.aggregated_indicators.rainless_data},
-                'Среднее': data.aggregated_indicators.avg_rainless_hours
-            }
-        ]
+        return {
+            'city': data.city,
+            'weather_stat': [
+                {
+                    'date': daily_stat.date,
+                    'daily_avg_temo': daily_stat.daily_avg_temp,
+                    'daily_rainless_hours': daily_stat.rainless_hours_count
+                }
+                for daily_stat in data.aggregated_indicators.weather_stat],
+            'avg_temp': data.aggregated_indicators.avg_temp,
+            'avg_rainless_hours': data.aggregated_indicators.avg_rainless_hours
+        }
 
 
 class DataAggregationTask:
@@ -116,11 +112,10 @@ class DataAggregationTask:
     __slots__ = ()
 
     @staticmethod
-    def save_results(to_save: list[dict], file_name: str = 'report.csv') -> pd.DataFrame:
-        df = pd.DataFrame(to_save)
-        df.to_csv(file_name, index=False)
-        logger.info(f'Saving results to {file_name}')
-        return df
+    def save_results(to_save: list[dict]) -> None:
+        with open(RESULT_FILE_NAME, 'w', encoding='utf-8') as file:
+            json.dump(to_save, file, indent=4)
+        logger.info(f'Saving results to {RESULT_FILE_NAME}')
 
 
 class DataAnalyzingTask:
@@ -128,12 +123,20 @@ class DataAnalyzingTask:
     __slots__ = ()
 
     @staticmethod
-    def visit_advice() -> list[str]:
-        df = pd.read_csv('report.csv')
-        df['Город/день'] = df['Город/день'].fillna(method='ffill')
-        df = df.groupby(
-            by=['Город/день']).agg({'Среднее': 'sum'})\
-            .rename(columns={'Среднее': 'Рейтинг'}).reset_index()
-        df['rank'] = df['Рейтинг'].rank(ascending=False).astype('int')
-        visit_cities = df[df['rank'] == df['rank'].min()]['Город/день'].unique()
-        return visit_cities
+    def visit_advice() -> list:
+        with open(RESULT_FILE_NAME, 'r') as file:
+            data: list[dict] = json.load(file)
+
+        max_rating = 0
+        cities_to_visit = []
+
+        # Not correct to use sort + lambda we need all cities that contain same stat
+        for city_stat in data:
+            rating = city_stat['avg_temp'] + city_stat['avg_rainless_hours']
+            if rating > max_rating:
+                cities_to_visit = [city_stat.get('city')]
+                max_rating = rating
+            elif rating == max_rating:
+                cities_to_visit.append(city_stat.get('city'))
+
+        return cities_to_visit
